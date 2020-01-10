@@ -102,6 +102,21 @@ class CodeVisitor(ast.NodeVisitor):
         '''Shorthand for ``obj.__class__.__name__``.'''
         return obj.__class__.__name__
 
+    @staticmethod
+    def get_call_string(obj):
+        '''Get the attribute path used to call a function'''
+        name = CodeVisitor.get_name(obj)
+        if name == 'Call':
+            return CodeVisitor.get_call_string(obj.func) + '()'
+        elif name == 'Subscript':
+            return CodeVisitor.get_call_string(obj.value) + '[]'
+        elif name == 'Name':
+            return obj.id
+        elif name == 'Attribute':
+            return CodeVisitor.get_call_string(obj.value) + '.' + obj.attr
+        else:
+            return '{Unknown}'
+
     @classmethod
     def from_code(cls, code, **kwargs):
         '''Instanciate the class from source code (string object). The
@@ -206,7 +221,8 @@ class ComplexityVisitor(CodeVisitor):
             self.complexity += len(node.values) - 1
         # Ifs, with and assert statements count all as 1.
         # Note: Lambda functions are not counted anymore, see #68
-        elif name in ('If', 'IfExp'):
+        # Note 2: For Keras-specific complexity we make sure to add with & lambda
+        elif name in ('If', 'IfExp'): #, 'With', 'Lambda'):
             self.complexity += 1
         # The For and While blocks count as 1 plus the `else` block.
         elif name in ('For', 'While', 'AsyncFor'):
@@ -214,7 +230,31 @@ class ComplexityVisitor(CodeVisitor):
         # List, set, dict comprehensions and generator exps count as 1 plus
         # the `if` statement.
         elif name == 'comprehension':
-            self.complexity += len(node.ifs) + 1
+             self.complexity += len(node.ifs) + 1
+        elif name == 'Call':
+            call_string = self.get_call_string(node)
+            if 'hasattr' in call_string:
+                self.complexity += 1
+            if 'getattr' in call_string:
+                self.complexity += 1
+            if 'executing_eagerly' in call_string:
+                self.complexity += 1
+            if 'nest.' in call_string:
+                self.complexity += 1
+            if 'cast' in call_string:
+                self.complexity += 1
+            if 'kwargs.' in call_string:
+                self.complexity += 1
+            if 'tensor_util' in call_string or 'utils.' in call_string:
+                self.complexity += 2 # This is 2 and not 1 because our utils are janky!
+            if 'len()' == call_string:
+                self.complexity += 1
+            if 'isinstance()' == call_string:
+                self.complexity += 1
+        elif name == 'Subscript':
+            if 'kwargs' in self.get_call_string(node):
+                self.complexity += 1
+
 
         super(ComplexityVisitor, self).generic_visit(node)
 
